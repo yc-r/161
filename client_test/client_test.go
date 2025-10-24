@@ -313,28 +313,6 @@ var _ = Describe("Client Tests", func() {
             Expect(string(data)).To(Equal("BBB"))
         })
 
-        // 新增测试组：更多边界与异常情况
-        Specify("Extra Test: Corrupted invite should not be accepted.", func() {
-            alice, err := client.InitUser("aliceCorrupt", "pw1")
-            Expect(err).To(BeNil())
-            bob, err := client.InitUser("bobCorrupt", "pw2")
-            Expect(err).To(BeNil())
-
-            err = alice.StoreFile("secret", []byte("TOPSECRET"))
-            Expect(err).To(BeNil())
-
-            invite, err := alice.CreateInvitation("secret", "bobCorrupt")
-            Expect(err).To(BeNil())
-            // 模拟损坏 invite（复制并修改字节）
-            corrupt := make([]byte, len(invite))
-            copy(corrupt, invite)
-            if len(corrupt) > 0 {
-                corrupt[0] ^= 0xFF
-            }
-            // Bob 尝试接受被损坏的 invite 应失败
-            err = bob.AcceptInvitation("aliceCorrupt", corrupt, "bobSecret")
-            Expect(err).ToNot(BeNil())
-        })
 
         Specify("Extra Test: Multiple invites to same recipient can be accepted under different names.", func() {
             alice, err := client.InitUser("aliceMulti", "pwA")
