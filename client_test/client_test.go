@@ -409,6 +409,117 @@ var _ = Describe("Client Tests", func() {
             Expect(err).To(BeNil())
             Expect(string(data)).To(ContainSubstring("-BOB"))
         })
+        Specify("Extra Test: owner can re-share after revoke and recipient can regain access", func() {
+            alice, err := client.InitUser("aliceReshare", "pwA")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobReshare", "pwB")
+            Expect(err).To(BeNil())
+
+            // Alice 存文件并分享给 Bob
+            err = alice.StoreFile("doc", []byte("FIRST"))
+            Expect(err).To(BeNil())
+
+            invite, err := alice.CreateInvitation("doc", "bobReshare")
+            Expect(err).To(BeNil())
+            err = bob.AcceptInvitation("aliceReshare", invite, "bobDoc1")
+            Expect(err).To(BeNil())
+
+            // Bob 能读
+            data, err := bob.LoadFile("bobDoc1")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(Equal("FIRST"))
+
+            // Alice revoke Bob
+            err = alice.RevokeAccess("doc", "bobReshare")
+            Expect(err).To(BeNil())
+
+            // Bob 不能读
+            _, err = bob.LoadFile("bobDoc1")
+            Expect(err).ToNot(BeNil())
+
+            // Alice 重新创建 invite 并分享，Bob 接受后应能再次访问
+            invite2, err := alice.CreateInvitation("doc", "bobReshare")
+            Expect(err).To(BeNil())
+            err = bob.AcceptInvitation("aliceReshare", invite2, "bobDoc2")
+            Expect(err).To(BeNil())
+
+            data, err = bob.LoadFile("bobDoc2")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(Equal("FIRST"))
+        })
+
+        // 额外测试：错误的 owner 名称接受 invite 应失败（防止被替代的邀请）
+        Specify("Extra Test: AcceptInvitation with wrong owner name should fail", func() {
+            alice, err := client.InitUser("aliceWrongOwner", "pwA")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobWrongOwner", "pwB")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("fileX", []byte("XDATA"))
+            Expect(err).To(BeNil())
+
+            invite, err := alice.CreateInvitation("fileX", "bobWrongOwner")
+            Expect(err).To(BeNil())
+
+            // Bob 尝试用错误的 owner 名称接受，应失败
+            err = bob.AcceptInvitation("aliceWrong", invite, "bobX")
+            Expect(err).ToNot(BeNil())
+
+            // 正确 owner 名称接受应成功
+            err = bob.AcceptInvitation("aliceWrongOwner", invite, "bobX2")
+            Expect(err).To(BeNil())
+            data, err := bob.LoadFile("bobX2")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(Equal("XDATA"))
+        })
+
+        // 额外测试：不同用户同名文件互不干扰（文件名隔离）
+        Specify("Extra Test: filename isolation between users", func() {
+            alice, err := client.InitUser("aliceIso", "pwA")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobIso", "pwB")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("sharedName", []byte("ALICE"))
+            Expect(err).To(BeNil())
+            err = bob.StoreFile("sharedName", []byte("BOB"))
+            Expect(err).To(BeNil())
+
+            da, err := alice.LoadFile("sharedName")
+            Expect(err).To(BeNil())
+            Expect(string(da)).To(Equal("ALICE"))
+
+            db, err := bob.LoadFile("sharedName")
+            Expect(err).To(BeNil())
+            Expect(string(db)).To(Equal("BOB"))
+        })
+
+        // 额外测试：并发会话交错 append 的可见性（简单顺序一致性）
+        Specify("Extra Test: interleaved appends from multiple sessions are visible to all", func() {
+            aliceMain, err := client.InitUser("aliceInter", "pwA")
+            Expect(err).To(BeNil())
+            // 第二个会话
+            aliceOther, err := client.GetUser("aliceInter", "pwA")
+            Expect(err).To(BeNil())
+
+            err = aliceMain.StoreFile("log", []byte("start"))
+            Expect(err).To(BeNil())
+
+            // 两个会话交替 append
+            err = aliceMain.AppendToFile("log", []byte("-A1"))
+            Expect(err).To(BeNil())
+            err = aliceOther.AppendToFile("log", []byte("-A2"))
+            Expect(err).To(BeNil())
+            err = aliceMain.AppendToFile("log", []byte("-A3"))
+            Expect(err).To(BeNil())
+
+            data, err := aliceOther.LoadFile("log")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(ContainSubstring("start"))
+            Expect(string(data)).To(ContainSubstring("-A1"))
+            Expect(string(data)).To(ContainSubstring("-A2"))
+            Expect(string(data)).To(ContainSubstring("-A3"))
+        })
 
 	})
 })
