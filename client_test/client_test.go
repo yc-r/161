@@ -250,5 +250,67 @@ var _ = Describe("Client Tests", func() {
 			Expect(err).ToNot(BeNil())
 		})
 
+        // 新增测试：重复 InitUser 应返回错误
+        Specify("Extra Test: Duplicate InitUser should return an error.", func() {
+            userlib.DebugMsg("Initializing user dupuser.")
+            u1, err := client.InitUser("dupuser", "pw123")
+            Expect(err).To(BeNil())
+            Expect(u1).ToNot(BeNil())
+
+            // 第二次用相同用户名初始化应失败
+            _, err = client.InitUser("dupuser", "pw123")
+            Expect(err).ToNot(BeNil())
+
+            // 用正确凭据 GetUser 应该仍然可以
+            u2, err := client.GetUser("dupuser", "pw123")
+            Expect(err).To(BeNil())
+            Expect(u2).ToNot(BeNil())
+        })
+
+        // 新增测试：撤销应仅影响被撤销的文件（隔离性）
+        Specify("Extra Test: Revoke should only affect the revoked file (isolation test).", func() {
+            userlib.DebugMsg("Initializing users AliceX and BobX.")
+            aliceX, err := client.InitUser("aliceX", "pwA")
+            Expect(err).To(BeNil())
+            bobX, err := client.InitUser("bobX", "pwB")
+            Expect(err).To(BeNil())
+
+            // AliceX 存两个文件
+            err = aliceX.StoreFile("fileA", []byte("AAA"))
+            Expect(err).To(BeNil())
+            err = aliceX.StoreFile("fileB", []byte("BBB"))
+            Expect(err).To(BeNil())
+
+            // 分享给 BobX
+            inviteA, err := aliceX.CreateInvitation("fileA", "bobX")
+            Expect(err).To(BeNil())
+            err = bobX.AcceptInvitation("aliceX", inviteA, "bobFileA")
+            Expect(err).To(BeNil())
+
+            inviteB, err := aliceX.CreateInvitation("fileB", "bobX")
+            Expect(err).To(BeNil())
+            err = bobX.AcceptInvitation("aliceX", inviteB, "bobFileB")
+            Expect(err).To(BeNil())
+
+            // BobX 能读取两个文件
+            data, err := bobX.LoadFile("bobFileA")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(Equal("AAA"))
+            data, err = bobX.LoadFile("bobFileB")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(Equal("BBB"))
+
+            // AliceX 撤销 BobX 对 fileA 的访问
+            err = aliceX.RevokeAccess("fileA", "bobX")
+            Expect(err).To(BeNil())
+
+            // BobX 不应能访问 bobFileA，但应仍能访问 bobFileB
+            _, err = bobX.LoadFile("bobFileA")
+            Expect(err).ToNot(BeNil())
+
+            data, err = bobX.LoadFile("bobFileB")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(Equal("BBB"))
+        })
 	})
 })
