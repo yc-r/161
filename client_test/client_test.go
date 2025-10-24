@@ -312,67 +312,103 @@ var _ = Describe("Client Tests", func() {
             Expect(err).To(BeNil())
             Expect(string(data)).To(Equal("BBB"))
         })
-
-
-        Specify("Extra Test: Multiple invites to same recipient can be accepted under different names.", func() {
-            alice, err := client.InitUser("aliceMulti", "pwA")
+        Specify("Confidentiality Test: uninvited user cannot read file", func() {
+            alice, err := client.InitUser("aliceConf", "pwA")
             Expect(err).To(BeNil())
-            bob, err := client.InitUser("bobMulti", "pwB")
+            bob, err := client.InitUser("bobConf", "pwB")
             Expect(err).To(BeNil())
-
-            err = alice.StoreFile("sharedFile", []byte("DATA"))
+            charlie, err := client.InitUser("charlieConf", "pwC")
             Expect(err).To(BeNil())
 
-            inv1, err := alice.CreateInvitation("sharedFile", "bobMulti")
-            Expect(err).To(BeNil())
-            inv2, err := alice.CreateInvitation("sharedFile", "bobMulti")
-            Expect(err).To(BeNil())
-
-            // Bob 接受两次 invite，保存为不同名字
-            err = bob.AcceptInvitation("aliceMulti", inv1, "bobCopy1")
-            Expect(err).To(BeNil())
-            err = bob.AcceptInvitation("aliceMulti", inv2, "bobCopy2")
+            // Alice 存文件并只分享给 Bob
+            err = alice.StoreFile("topsecret", []byte("SENSITIVE"))
             Expect(err).To(BeNil())
 
-            // Bob 可以从两个名字读取同样内容
-            d1, err := bob.LoadFile("bobCopy1")
+            invite, err := alice.CreateInvitation("topsecret", "bobConf")
             Expect(err).To(BeNil())
-            d2, err := bob.LoadFile("bobCopy2")
+            err = bob.AcceptInvitation("aliceConf", invite, "bobSecret")
             Expect(err).To(BeNil())
-            Expect(string(d1)).To(Equal("DATA"))
-            Expect(string(d2)).To(Equal("DATA"))
+
+            // Charlie 没有被邀请，不能读取
+            _, err = charlie.LoadFile("bobSecret")
+            Expect(err).ToNot(BeNil())
+            _, err = charlie.LoadFile("topsecret")
+            Expect(err).ToNot(BeNil())
         })
 
-        Specify("Extra Test: Revoke prevents future appends by revoked user.", func() {
-            alice, err := client.InitUser("aliceRevoke", "pwa")
+        // 额外测试：机密性 - 针对某个接收者的 invite 不应被其它用户接受
+        Specify("Confidentiality Test: invite for Bob cannot be accepted by Charlie", func() {
+            alice, err := client.InitUser("aliceInvite", "pw1")
             Expect(err).To(BeNil())
-            bob, err := client.InitUser("bobRevoke", "pwb")
+            bob, err := client.InitUser("bobInvite", "pw2")
             Expect(err).To(BeNil())
-
-            err = alice.StoreFile("log", []byte("start"))
-            Expect(err).To(BeNil())
-
-            invite, err := alice.CreateInvitation("log", "bobRevoke")
-            Expect(err).To(BeNil())
-            err = bob.AcceptInvitation("aliceRevoke", invite, "bobLog")
+            charlie, err := client.InitUser("charlieInvite", "pw3")
             Expect(err).To(BeNil())
 
-            // Bob 能 append
-            err = bob.AppendToFile("bobLog", []byte("-ok"))
+            err = alice.StoreFile("doc", []byte("DOC"))
             Expect(err).To(BeNil())
 
-            // Alice revoke Bob
-            err = alice.RevokeAccess("log", "bobRevoke")
+            invite, err := alice.CreateInvitation("doc", "bobInvite")
             Expect(err).To(BeNil())
 
-            // Bob 尝试 append 应失败
-            err = bob.AppendToFile("bobLog", []byte("-later"))
+            // Charlie 尝试接受发给 Bob 的 invite 应失败
+            err = charlie.AcceptInvitation("aliceInvite", invite, "charlieDoc")
             Expect(err).ToNot(BeNil())
 
-            // Alice 仍能读取 original file
-            data, err := alice.LoadFile("log")
+            // Bob 能正常接受
+            err = bob.AcceptInvitation("aliceInvite", invite, "bobDoc")
             Expect(err).To(BeNil())
-            Expect(string(data)).To(ContainSubstring("start"))
         })
+
+        // 额外测试：完整性 - 重放/再次使用已被撤销或已使用的 invite 应被拒绝（若实现了防护）
+        Specify("Integrity Test: replaying or reusing an invite after revoke/accept should not grant extra access", func() {
+            alice, err := client.InitUser("aliceReplay", "pwA")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobReplay", "pwB")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("journal", []byte("LOG"))
+            Expect(err).To(BeNil())
+
+            invite, err := alice.CreateInvitation("journal", "bobReplay")
+            Expect(err).To(BeNil())
+
+            // Bob 接受 invite（第一次接受应该成功）
+            err = bob.AcceptInvitation("aliceReplay", invite, "bobJournal1")
+            Expect(err).To(BeNil())
+
+            // Alice 撤销 Bob 的访问
+            err = alice.RevokeAccess("journal", "bobReplay")
+            Expect(err).To(BeNil())
+
+            // Bob 再次尝试用同一个 invite 接受为另一个名字，应被拒绝（如果实现了防护）
+            err = bob.AcceptInvitation("aliceReplay", invite, "bobJournal2")
+            Expect(err).ToNot(BeNil())
+        })
+
+        // 额外测试：完整性 - 被接受的邀请所产生的修改对所有被授权方可见
+        Specify("Integrity Test: updates from authorized users are visible to owner and other authorized users", func() {
+            alice, err := client.InitUser("aliceInt", "pwa")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobInt", "pwb")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("shared", []byte("INIT"))
+            Expect(err).To(BeNil())
+
+            invite, err := alice.CreateInvitation("shared", "bobInt")
+            Expect(err).To(BeNil())
+            err = bob.AcceptInvitation("aliceInt", invite, "bobShared")
+            Expect(err).To(BeNil())
+
+            // Bob append，Alice 应能看到改动
+            err = bob.AppendToFile("bobShared", []byte("-BOB"))
+            Expect(err).To(BeNil())
+
+            data, err := alice.LoadFile("shared")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(ContainSubstring("-BOB"))
+        })
+
 	})
 })
