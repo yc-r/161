@@ -521,5 +521,74 @@ var _ = Describe("Client Tests", func() {
             Expect(string(data)).To(ContainSubstring("-A3"))
         })
 
+        // 额外测试：错误密码 GetUser 应该失败
+        Specify("Auth Test: GetUser with wrong password should fail", func() {
+            _, err := client.InitUser("authUser", "rightpw")
+            Expect(err).To(BeNil())
+
+            // 用错误密码 GetUser 应返回错误
+            _, err = client.GetUser("authUser", "wrongpw")
+            Expect(err).ToNot(BeNil())
+
+            // 用正确密码应成功
+            u, err := client.GetUser("authUser", "rightpw")
+            Expect(err).To(BeNil())
+            Expect(u).ToNot(BeNil())
+        })
+
+        // 额外测试：StoreFile 覆盖行为（再次 Store 覆盖原内容）
+        Specify("Storage Test: StoreFile overwrites existing file", func() {
+            alice, err := client.InitUser("aliceOverwrite", "pw")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("notes", []byte("first"))
+            Expect(err).To(BeNil())
+
+            // 覆盖
+            err = alice.StoreFile("notes", []byte("second"))
+            Expect(err).To(BeNil())
+
+            data, err := alice.LoadFile("notes")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(Equal("second"))
+        })
+
+        // 额外测试：同一 invite 被同一接受者、同一名字接收第二次应失败
+        Specify("Invite Test: accepting same invite twice under same name should fail", func() {
+            alice, err := client.InitUser("aliceReuse", "pwA")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobReuse", "pwB")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("log", []byte("L"))
+            Expect(err).To(BeNil())
+
+            invite, err := alice.CreateInvitation("log", "bobReuse")
+            Expect(err).To(BeNil())
+
+            // 第一次接受应成功
+            err = bob.AcceptInvitation("aliceReuse", invite, "bobLog")
+            Expect(err).To(BeNil())
+
+            // 第二次用同样的 invite 和同样名字接受应失败
+            err = bob.AcceptInvitation("aliceReuse", invite, "bobLog")
+            Expect(err).ToNot(BeNil())
+        })
+
+        // 额外测试：Owner 不应能用 AcceptInvitation 接受自己发出的 invite（应报错）
+        Specify("Invite Test: owner cannot accept their own invitation", func() {
+            alice, err := client.InitUser("aliceSelf", "pwA")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("doc", []byte("D"))
+            Expect(err).To(BeNil())
+
+            invite, err := alice.CreateInvitation("doc", "aliceSelf")
+            Expect(err).To(BeNil())
+
+            // 尝试让 owner 自己接受应该被拒绝
+            err = alice.AcceptInvitation("aliceSelf", invite, "aliceDoc")
+            Expect(err).ToNot(BeNil())
+        })
 	})
 })
