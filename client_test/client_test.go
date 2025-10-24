@@ -313,5 +313,88 @@ var _ = Describe("Client Tests", func() {
             Expect(string(data)).To(Equal("BBB"))
         })
 
+        // 新增测试组：更多边界与异常情况
+        Specify("Extra Test: Corrupted invite should not be accepted.", func() {
+            alice, err := client.InitUser("aliceCorrupt", "pw1")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobCorrupt", "pw2")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("secret", []byte("TOPSECRET"))
+            Expect(err).To(BeNil())
+
+            invite, err := alice.CreateInvitation("secret", "bobCorrupt")
+            Expect(err).To(BeNil())
+            // 模拟损坏 invite（复制并修改字节）
+            corrupt := make([]byte, len(invite))
+            copy(corrupt, invite)
+            if len(corrupt) > 0 {
+                corrupt[0] ^= 0xFF
+            }
+            // Bob 尝试接受被损坏的 invite 应失败
+            err = bob.AcceptInvitation("aliceCorrupt", corrupt, "bobSecret")
+            Expect(err).ToNot(BeNil())
+        })
+
+        Specify("Extra Test: Multiple invites to same recipient can be accepted under different names.", func() {
+            alice, err := client.InitUser("aliceMulti", "pwA")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobMulti", "pwB")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("sharedFile", []byte("DATA"))
+            Expect(err).To(BeNil())
+
+            inv1, err := alice.CreateInvitation("sharedFile", "bobMulti")
+            Expect(err).To(BeNil())
+            inv2, err := alice.CreateInvitation("sharedFile", "bobMulti")
+            Expect(err).To(BeNil())
+
+            // Bob 接受两次 invite，保存为不同名字
+            err = bob.AcceptInvitation("aliceMulti", inv1, "bobCopy1")
+            Expect(err).To(BeNil())
+            err = bob.AcceptInvitation("aliceMulti", inv2, "bobCopy2")
+            Expect(err).To(BeNil())
+
+            // Bob 可以从两个名字读取同样内容
+            d1, err := bob.LoadFile("bobCopy1")
+            Expect(err).To(BeNil())
+            d2, err := bob.LoadFile("bobCopy2")
+            Expect(err).To(BeNil())
+            Expect(string(d1)).To(Equal("DATA"))
+            Expect(string(d2)).To(Equal("DATA"))
+        })
+
+        Specify("Extra Test: Revoke prevents future appends by revoked user.", func() {
+            alice, err := client.InitUser("aliceRevoke", "pwa")
+            Expect(err).To(BeNil())
+            bob, err := client.InitUser("bobRevoke", "pwb")
+            Expect(err).To(BeNil())
+
+            err = alice.StoreFile("log", []byte("start"))
+            Expect(err).To(BeNil())
+
+            invite, err := alice.CreateInvitation("log", "bobRevoke")
+            Expect(err).To(BeNil())
+            err = bob.AcceptInvitation("aliceRevoke", invite, "bobLog")
+            Expect(err).To(BeNil())
+
+            // Bob 能 append
+            err = bob.AppendToFile("bobLog", []byte("-ok"))
+            Expect(err).To(BeNil())
+
+            // Alice revoke Bob
+            err = alice.RevokeAccess("log", "bobRevoke")
+            Expect(err).To(BeNil())
+
+            // Bob 尝试 append 应失败
+            err = bob.AppendToFile("bobLog", []byte("-later"))
+            Expect(err).ToNot(BeNil())
+
+            // Alice 仍能读取 original file
+            data, err := alice.LoadFile("log")
+            Expect(err).To(BeNil())
+            Expect(string(data)).To(ContainSubstring("start"))
+        })
 	})
 })
